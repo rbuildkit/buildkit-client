@@ -570,6 +570,48 @@ impl GrpcTunnel {
     }
 
     /// Handle Auth.GetTokenAuthority request
+    ///
+    /// # Implementation Strategy
+    ///
+    /// This function implements the **empty response strategy** for GetTokenAuthority,
+    /// returning a success response with an empty `public_key` field.
+    ///
+    /// However, it is currently **unused** in favor of the **error response strategy**
+    /// (see line 97-102), which directly returns a gRPC error to BuildKit.
+    ///
+    /// ## Two Valid Approaches
+    ///
+    /// Both strategies achieve the same result - BuildKit falls back to `Credentials` auth:
+    ///
+    /// 1. **Error Response Strategy** (current implementation):
+    ///    - Returns `grpc-status: 2` (UNKNOWN/UNIMPLEMENTED)
+    ///    - Semantically clearer: "feature not supported"
+    ///    - BuildKit detects error → falls back to `Credentials`
+    ///
+    /// 2. **Empty Response Strategy** (this function):
+    ///    - Returns `grpc-status: 0` (OK) with `public_key: []`
+    ///    - BuildKit checks `pubKey == nil` → falls back to `Credentials`
+    ///    - See BuildKit source: `util/resolver/authorizer.go:183-190`
+    ///
+    /// ## Why Keep This Function?
+    ///
+    /// Preserved for future use if switching to empty response strategy is desired:
+    /// - To avoid error logs in BuildKit output
+    /// - To maintain protocol compatibility with certain BuildKit versions
+    /// - As reference implementation for token authority protocol
+    ///
+    /// ## How to Use This Function
+    ///
+    /// To switch from error response to empty response strategy, replace lines 97-102 with:
+    ///
+    /// ```rust
+    /// "/moby.filesync.v1.Auth/GetTokenAuthority" => {
+    ///     let payload = Self::read_unary_request(body).await?;
+    ///     let response_payload = self.handle_auth_get_token_authority(payload).await?;
+    ///     self.send_success_response(respond, response_payload).await
+    /// }
+    /// ```
+    #[allow(dead_code)]
     async fn handle_auth_get_token_authority(&self, payload: Bytes) -> Result<Bytes> {
         use crate::proto::moby::filesync::v1::{GetTokenAuthorityRequest, GetTokenAuthorityResponse};
 
@@ -579,6 +621,7 @@ impl GrpcTunnel {
         tracing::info!("Auth.GetTokenAuthority request for host: {}", request.host);
 
         // Return empty response - we don't implement token-based auth
+        // BuildKit will detect empty public_key and fall back to Credentials method
         let response = GetTokenAuthorityResponse {
             public_key: vec![],
         };

@@ -8,7 +8,7 @@
 
 mod common;
 
-use buildkit_client::{BuildKitClient, BuildConfig};
+use buildkit_client::{BuildConfig, BuildKitClient};
 use common::*;
 
 #[tokio::test]
@@ -62,21 +62,28 @@ async fn test_build_with_custom_dockerfile() {
 
     // Create a custom Dockerfile with a different name
     let custom_dockerfile = test_dir.join("Custom.Dockerfile");
-    std::fs::write(&custom_dockerfile, r#"FROM alpine:latest
+    std::fs::write(
+        &custom_dockerfile,
+        r#"FROM alpine:latest
 RUN echo "Custom Dockerfile"
-"#).unwrap();
+"#,
+    )
+    .unwrap();
 
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .dockerfile("Custom.Dockerfile");
+    let config = BuildConfig::local(&test_dir).dockerfile("Custom.Dockerfile");
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with custom Dockerfile failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with custom Dockerfile failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -111,14 +118,17 @@ async fn test_multistage_build_with_target() {
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
     // Build only the builder stage
-    let config = BuildConfig::local(&test_dir)
-        .target("builder");
+    let config = BuildConfig::local(&test_dir).target("builder");
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Multistage build with target failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Multistage build with target failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -146,7 +156,11 @@ RUN cat /main.txt /config.txt /data.txt
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with context files failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with context files failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -159,14 +173,17 @@ async fn test_build_with_no_cache() {
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .no_cache(true);
+    let config = BuildConfig::local(&test_dir).no_cache(true);
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with no-cache failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with no-cache failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -174,15 +191,19 @@ async fn test_build_with_pull() {
     skip_without_buildkit!();
 
     let test_dir = create_temp_dir("pull");
-    create_test_dockerfile(&test_dir, Some(r#"FROM alpine:latest
+    create_test_dockerfile(
+        &test_dir,
+        Some(
+            r#"FROM alpine:latest
 RUN apk add --no-cache curl
-"#));
+"#,
+        ),
+    );
 
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .pull(true);
+    let config = BuildConfig::local(&test_dir).pull(true);
 
     let result = client.build(config, None).await;
 
@@ -211,7 +232,11 @@ async fn test_build_with_progress_handler() {
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with progress handler failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with progress handler failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -238,7 +263,11 @@ RUN test ! -d /app/subdir || (echo "subdir should be ignored" && exit 1)
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with .dockerignore failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with .dockerignore failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -260,7 +289,10 @@ async fn test_invalid_dockerfile_syntax() {
     cleanup_temp_dir(&test_dir);
 
     // Should fail with an error
-    assert!(result.is_err(), "Build should fail with invalid Dockerfile syntax");
+    assert!(
+        result.is_err(),
+        "Build should fail with invalid Dockerfile syntax"
+    );
 }
 
 #[tokio::test]
@@ -269,8 +301,11 @@ async fn test_build_nonexistent_base_image() {
 
     let test_dir = create_temp_dir("nonexistent-image");
 
-    std::fs::write(test_dir.join("Dockerfile"),
-        "FROM nonexistent-image-that-does-not-exist:latest\n").unwrap();
+    std::fs::write(
+        test_dir.join("Dockerfile"),
+        "FROM nonexistent-image-that-does-not-exist:latest\n",
+    )
+    .unwrap();
 
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
@@ -282,7 +317,10 @@ async fn test_build_nonexistent_base_image() {
     cleanup_temp_dir(&test_dir);
 
     // Should fail because the base image doesn't exist
-    assert!(result.is_err(), "Build should fail with nonexistent base image");
+    assert!(
+        result.is_err(),
+        "Build should fail with nonexistent base image"
+    );
 }
 
 #[tokio::test]
@@ -303,7 +341,11 @@ async fn test_multiple_tags() {
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with multiple tags configuration failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with multiple tags configuration failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -326,14 +368,17 @@ async fn test_large_context() {
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .tag(random_test_tag());
+    let config = BuildConfig::local(&test_dir).tag(random_test_tag());
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with large context failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with large context failed: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -354,22 +399,30 @@ async fn test_push_to_local_registry() {
     let image_name = format!("push-test-{}", rand::random::<u32>());
     let tag = format!("registry:5000/{image_name}:latest");
 
-    let config = BuildConfig::local(&test_dir)
-        .tag(&tag);
+    let config = BuildConfig::local(&test_dir).tag(&tag);
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build and push to registry failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build and push to registry failed: {:?}",
+        result.err()
+    );
 
     // Verify image was pushed to registry
-    let registry_url = format!("http://registry.buildkit-client.orb.local:5000/v2/{image_name}/tags/list");
+    let registry_url =
+        format!("http://registry.buildkit-client.orb.local:5000/v2/{image_name}/tags/list");
     let response = reqwest::get(&registry_url).await;
 
     assert!(response.is_ok(), "Failed to query registry");
     let body = response.unwrap().text().await.unwrap();
-    assert!(body.contains("latest"), "Image tag 'latest' not found in registry: {}", body);
+    assert!(
+        body.contains("latest"),
+        "Image tag 'latest' not found in registry: {}",
+        body
+    );
 }
 
 #[tokio::test]
@@ -386,18 +439,21 @@ async fn test_push_multiple_tags() {
     let tag1 = format!("registry:5000/{image_name}:v1.0");
     let tag2 = format!("registry:5000/{image_name}:latest");
 
-    let config = BuildConfig::local(&test_dir)
-        .tag(&tag1)
-        .tag(&tag2);
+    let config = BuildConfig::local(&test_dir).tag(&tag1).tag(&tag2);
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with multiple tags failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with multiple tags failed: {:?}",
+        result.err()
+    );
 
     // Verify both tags exist
-    let registry_url = format!("http://registry.buildkit-client.orb.local:5000/v2/{image_name}/tags/list");
+    let registry_url =
+        format!("http://registry.buildkit-client.orb.local:5000/v2/{image_name}/tags/list");
     let response = reqwest::get(&registry_url).await.unwrap();
     let body = response.text().await.unwrap();
 
@@ -430,14 +486,17 @@ RUN echo "Secret was successfully mounted and verified"
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .secret("test_secret", "my-secret-value");
+    let config = BuildConfig::local(&test_dir).secret("test_secret", "my-secret-value");
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with secret failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with secret failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -477,7 +536,11 @@ RUN echo "All secrets verified successfully"
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with multiple secrets failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with multiple secrets failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -500,14 +563,17 @@ RUN echo "Secret environment variable verified"
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .secret("my_token", "token-abc-123");
+    let config = BuildConfig::local(&test_dir).secret("my_token", "token-abc-123");
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Build with secret as env failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build with secret as env failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -532,14 +598,17 @@ RUN echo "Secret isolation verified"
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::local(&test_dir)
-        .secret("temp_secret", "temporary");
+    let config = BuildConfig::local(&test_dir).secret("temp_secret", "temporary");
 
     let result = client.build(config, None).await;
 
     cleanup_temp_dir(&test_dir);
 
-    assert!(result.is_ok(), "Secret isolation test failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Secret isolation test failed: {:?}",
+        result.err()
+    );
 }
 
 // ============================================================================
@@ -557,7 +626,11 @@ async fn test_github_public_repo_build() {
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from public GitHub repo failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from public GitHub repo failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -567,21 +640,28 @@ async fn test_github_public_repo_with_ref() {
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
-    let config = BuildConfig::github("https://github.com/buildkit-rs/hello-world-public")
-        .git_ref("main");
+    let config =
+        BuildConfig::github("https://github.com/buildkit-rs/hello-world-public").git_ref("main");
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from public GitHub repo with ref failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from public GitHub repo with ref failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
 async fn test_github_private_repo_build() {
     skip_without_buildkit!();
 
-    // Get GitHub token from environment
-    let github_token = std::env::var("GITHUB_TOKEN")
-        .unwrap_or_else(|_| "ffffff".to_string());
+    test_integration_with_env();
+
+    skip_without_pat_token!();
+
+    let github_token =
+        std::env::var("PAT_TOKEN").expect("PAT_TOKEN environment variable is not set");
 
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
@@ -591,15 +671,23 @@ async fn test_github_private_repo_build() {
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from private GitHub repo failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from private GitHub repo failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
 async fn test_github_private_repo_with_ref() {
     skip_without_buildkit!();
 
-    let github_token = std::env::var("GITHUB_TOKEN")
-        .unwrap_or_else(|_| "ffffff".to_string());
+    test_integration_with_env();
+    
+    skip_without_pat_token!();
+
+    let github_token =
+        std::env::var("PAT_TOKEN").expect("PAT_TOKEN environment variable is not set");
 
     let addr = get_buildkit_addr();
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
@@ -610,7 +698,11 @@ async fn test_github_private_repo_with_ref() {
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from private GitHub repo with ref failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from private GitHub repo with ref failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -625,7 +717,11 @@ async fn test_github_with_custom_dockerfile() {
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from GitHub with custom Dockerfile failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from GitHub with custom Dockerfile failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -641,7 +737,11 @@ async fn test_github_with_build_args() {
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from GitHub with build args failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from GitHub with build args failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -657,7 +757,10 @@ async fn test_github_private_without_token() {
     let result = client.build(config, None).await;
 
     // This should fail because no authentication is provided
-    assert!(result.is_err(), "Build from private GitHub repo without token should fail");
+    assert!(
+        result.is_err(),
+        "Build from private GitHub repo without token should fail"
+    );
 }
 
 #[tokio::test]
@@ -675,7 +778,11 @@ async fn test_github_with_progress_handler() {
 
     let result = client.build(config, Some(progress)).await;
 
-    assert!(result.is_ok(), "Build from GitHub with progress handler failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from GitHub with progress handler failed: {:?}",
+        result.err()
+    );
 }
 
 #[tokio::test]
@@ -687,10 +794,14 @@ async fn test_github_with_commit_ref() {
     let mut client = BuildKitClient::connect(&addr).await.unwrap();
 
     // Use a specific commit hash (this would need to be a real commit in the repo)
-    let config = BuildConfig::github("https://github.com/buildkit-rs/hello-world-public")
-        .git_ref("HEAD");
+    let config =
+        BuildConfig::github("https://github.com/buildkit-rs/hello-world-public").git_ref("HEAD");
 
     let result = client.build(config, None).await;
 
-    assert!(result.is_ok(), "Build from GitHub with commit ref failed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Build from GitHub with commit ref failed: {:?}",
+        result.err()
+    );
 }

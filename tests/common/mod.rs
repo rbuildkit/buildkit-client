@@ -1,8 +1,8 @@
 //! Common test utilities and fixtures
 
 use std::env;
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 /// Get BuildKit address from environment or use default
 pub fn get_buildkit_addr() -> String {
@@ -94,11 +94,32 @@ pub fn cleanup_temp_dir(dir: &Path) {
 macro_rules! skip_without_buildkit {
     () => {
         if !common::is_buildkit_available().await {
-            eprintln!("Skipping test: BuildKit is not available at {}", common::get_buildkit_addr());
+            eprintln!(
+                "Skipping test: BuildKit is not available at {}",
+                common::get_buildkit_addr()
+            );
             eprintln!("Set BUILDKIT_ADDR environment variable to specify BuildKit address");
             return;
         }
     };
+}
+
+/// Skip test if PAT_TOKEN environment variable is not set
+#[macro_export]
+macro_rules! skip_without_pat_token {
+    () => {
+        if std::env::var("PAT_TOKEN").is_err() {
+            eprintln!("Skipping test: PAT_TOKEN environment variable is not set");
+            return;
+        }
+    };
+}
+
+/// Test integration with environment variables
+pub fn test_integration_with_env() {
+    use dotenv;
+
+    dotenv::dotenv().ok();
 }
 
 /// Create a .dockerignore file
@@ -121,7 +142,11 @@ pub fn assert_directory_structure(dir: &Path, expected_files: &[&str]) {
 
     for file in expected_files {
         let path = dir.join(file);
-        assert!(path.exists(), "Expected file {} does not exist", path.display());
+        assert!(
+            path.exists(),
+            "Expected file {} does not exist",
+            path.display()
+        );
     }
 }
 
@@ -164,12 +189,15 @@ mod tests {
         let dir = create_temp_dir("context-test");
         create_test_context(&dir);
 
-        assert_directory_structure(&dir, &[
-            "Dockerfile",
-            "app/main.txt",
-            "app/config.txt",
-            "app/subdir/data.txt",
-        ]);
+        assert_directory_structure(
+            &dir,
+            &[
+                "Dockerfile",
+                "app/main.txt",
+                "app/config.txt",
+                "app/subdir/data.txt",
+            ],
+        );
 
         cleanup_temp_dir(&dir);
     }

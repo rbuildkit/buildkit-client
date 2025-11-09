@@ -218,7 +218,7 @@ impl BuildKitClient {
             source_policy: None,
             exporters: exports,
             enable_session_exporter: false,
-            source_policy_session: String::new(),
+            // source_policy_session: String::new(),
         };
 
         // Start the build

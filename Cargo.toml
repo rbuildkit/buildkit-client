@@ -2,6 +2,26 @@
 name = "buildkit-client"
 version = "0.1.0"
 edition = "2021"
+authors = ["AprilNEA <dev@aprilnea.me>"]
+description = "A Rust client library and CLI for interacting with BuildKit via gRPC, implementing the complete BuildKit session protocol"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/rbuildkit/buildkit-client"
+homepage = "https://github.com/rbuildkit/buildkit-client"
+documentation = "https://docs.rs/buildkit-client"
+readme = "README.md"
+keywords = ["buildkit", "docker", "container", "grpc", "build"]
+categories = ["api-bindings", "development-tools", "command-line-utilities"]
+include = [
+    "src/**/*",
+    "tests/**/*",
+    "examples/**/*",
+    "benches/**/*",
+    "build.rs",
+    "Cargo.toml",
+    "README.md",
+    "LICENSE*",
+    "proto/**/*.proto",
+]
 
 [dependencies]
 # gRPC and async runtime
@@ -42,6 +62,8 @@ tempfile = "3.0"
 [build-dependencies]
 # For potential custom proto compilation if needed
 tonic-build = "0.12"
+# HTTP client for downloading proto files
+reqwest = { version = "0.12", features = ["blocking"] }
 
 [[bench]]
 name = "build_bench"

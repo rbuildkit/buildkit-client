@@ -39,6 +39,12 @@ readme = { workspace = true }
 keywords = { workspace = true }
 categories = { workspace = true }
 
+[package.metadata.docs.rs]
+# Configuration for docs.rs
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
 [dependencies]
 # gRPC and async runtime
 tonic = "0.12"
@@ -74,6 +80,8 @@ http = "1.0"
 # Testing
 criterion = { version = "0.5", features = ["async_tokio"] }
 tempfile = "3.0"
+reqwest = { version = "0.12", features = ["json", "blocking"] }
+rand = "0.8"
 
 [build-dependencies]
 # For potential custom proto compilation if needed

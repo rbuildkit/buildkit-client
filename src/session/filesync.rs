@@ -13,12 +13,29 @@ use crate::proto::moby::filesync::v1::{
 };
 
 /// File sync server implementation
+///
+/// Implements the BuildKit file synchronization protocol for streaming
+/// local build context files to BuildKit.
 #[derive(Debug, Clone)]
 pub struct FileSyncServer {
     root_path: PathBuf,
 }
 
 impl FileSyncServer {
+    /// Create a new file sync server
+    ///
+    /// # Arguments
+    ///
+    /// * `root_path` - Root directory to serve files from
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use buildkit_client::session::FileSyncServer;
+    /// use std::path::PathBuf;
+    ///
+    /// let sync = FileSyncServer::new(PathBuf::from("."));
+    /// ```
     pub fn new(root_path: impl Into<PathBuf>) -> Self {
         Self {
             root_path: root_path.into(),

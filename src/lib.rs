@@ -57,6 +57,34 @@
 //!     Ok(())
 //! }
 //! ```
+//!
+//! ## Multi-platform build with registry authentication
+//!
+//! ```no_run
+//! use buildkit_client::{BuildKitClient, BuildConfig, Platform, RegistryAuth};
+//! use buildkit_client::progress::ConsoleProgressHandler;
+//!
+//! #[tokio::main]
+//! async fn main() -> anyhow::Result<()> {
+//!     let mut client = BuildKitClient::connect("http://localhost:1234").await?;
+//!
+//!     let config = BuildConfig::local(".")
+//!         .platform(Platform::linux_amd64())
+//!         .platform(Platform::linux_arm64())
+//!         .tag("docker.io/myuser/myapp:latest")
+//!         .registry_auth(RegistryAuth {
+//!             host: "docker.io".to_string(),
+//!             username: "myuser".to_string(),
+//!             password: "mytoken".to_string(),
+//!         });
+//!
+//!     let progress = Box::new(ConsoleProgressHandler::new(true));
+//!     let result = client.build(config, Some(progress)).await?;
+//!
+//!     println!("Multi-platform image built: {:?}", result.digest);
+//!     Ok(())
+//! }
+//! ```
 
 pub mod proto;
 pub mod builder;

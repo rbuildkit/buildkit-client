@@ -2,6 +2,7 @@
 
 pub mod filesync;
 pub mod auth;
+pub mod secrets;
 pub mod grpc_tunnel;
 
 use anyhow::{Context, Result};
@@ -17,10 +18,16 @@ use grpc_tunnel::GrpcTunnel;
 
 pub use filesync::FileSyncServer;
 pub use auth::{AuthServer, RegistryAuthConfig};
+pub use secrets::SecretsServer;
 
 /// Session manager for BuildKit
+///
+/// Manages a BuildKit session lifecycle including file synchronization,
+/// authentication, and bidirectional gRPC streaming.
 pub struct Session {
+    /// Unique session identifier (UUID format)
     pub id: String,
+    /// Shared key for session identification in BuildKit requests
     pub shared_key: String,
     tx: Option<mpsc::Sender<BytesMessage>>,
     services: Arc<Mutex<SessionServices>>,
@@ -30,6 +37,7 @@ pub struct Session {
 struct SessionServices {
     file_sync: Option<FileSyncServer>,
     auth: Option<AuthServer>,
+    secrets: Option<SecretsServer>,
 }
 
 impl Session {
@@ -45,6 +53,7 @@ impl Session {
             services: Arc::new(Mutex::new(SessionServices {
                 file_sync: None,
                 auth: None,
+                secrets: None,
             })),
         }
     }
@@ -61,6 +70,13 @@ impl Session {
         let mut services = self.services.lock().await;
         services.auth = Some(auth);
         tracing::debug!("Added Auth service");
+    }
+
+    /// Add secrets service
+    pub async fn add_secrets(&mut self, secrets: SecretsServer) {
+        let mut services = self.services.lock().await;
+        services.secrets = Some(secrets);
+        tracing::debug!("Added Secrets service");
     }
 
     /// Start a session with BuildKit
@@ -109,6 +125,7 @@ impl Session {
         let services_guard = services.lock().await;
         let file_sync = services_guard.file_sync.clone();
         let auth = services_guard.auth.clone();
+        let secrets = services_guard.secrets.clone();
         drop(services_guard);
 
         // Spawn task to receive from BuildKit and forward to tunnel
@@ -134,7 +151,7 @@ impl Session {
         });
 
         // Start the HTTP/2 server in the tunnel
-        let tunnel = GrpcTunnel::new(tx.clone(), file_sync, auth);
+        let tunnel = GrpcTunnel::new(tx.clone(), file_sync, auth, secrets);
         tokio::spawn(async move {
             if let Err(e) = tunnel.serve(inbound_rx, outbound_tx).await {
                 tracing::error!("HTTP/2 tunnel error: {}", e);
@@ -161,6 +178,7 @@ impl Session {
         methods.push("/moby.filesync.v1.Auth/FetchToken".to_string());
         methods.push("/moby.filesync.v1.Auth/GetTokenAuthority".to_string());
         methods.push("/moby.filesync.v1.Auth/VerifyTokenAuthority".to_string());
+        methods.push("/moby.buildkit.secrets.v1.Secrets/GetSecret".to_string());
         meta.insert("X-Docker-Expose-Session-Grpc-Method".to_string(), methods);
 
         meta
@@ -196,6 +214,11 @@ pub struct FileSync {
 }
 
 impl FileSync {
+    /// Create a new FileSync helper with the given context path
+    ///
+    /// # Arguments
+    ///
+    /// * `context_path` - Path to the build context directory
     pub fn new(context_path: impl Into<PathBuf>) -> Self {
         Self {
             context_path: context_path.into(),

@@ -627,6 +627,7 @@ fn compile_protos() -> Result<(), Box<dyn std::error::Error>> {
                 proto_dir.join("github.com/moby/buildkit/api/services/control/control.proto"),
                 proto_dir.join("github.com/moby/buildkit/session/filesync/filesync.proto"),
                 proto_dir.join("github.com/moby/buildkit/session/auth/auth.proto"),
+                proto_dir.join("github.com/moby/buildkit/session/secrets/secrets.proto"),
             ],
             &[&proto_dir], // Include path
         )?;

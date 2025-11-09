@@ -15,12 +15,13 @@ use tokio::sync::mpsc;
 use prost::Message as ProstMessage;
 
 use crate::proto::moby::buildkit::v1::BytesMessage;
-use super::{FileSyncServer, AuthServer};
+use super::{FileSyncServer, AuthServer, SecretsServer};
 
 /// Stream multiplexer for handling gRPC tunneled through session
 pub struct GrpcTunnel {
     file_sync: Option<FileSyncServer>,
     auth: Option<AuthServer>,
+    secrets: Option<SecretsServer>,
 }
 
 impl GrpcTunnel {
@@ -29,10 +30,12 @@ impl GrpcTunnel {
         _response_tx: mpsc::Sender<BytesMessage>,
         file_sync: Option<FileSyncServer>,
         auth: Option<AuthServer>,
+        secrets: Option<SecretsServer>,
     ) -> Self {
         Self {
             file_sync,
             auth,
+            secrets,
         }
     }
 
@@ -92,9 +95,9 @@ impl GrpcTunnel {
                 self.handle_file_sync_diff_copy_stream(body, respond).await
             }
             "/moby.filesync.v1.Auth/GetTokenAuthority" => {
-                // Token-based auth not supported - return unimplemented error
-                // BuildKit will fall back to other auth methods
-                tracing::info!("Auth.GetTokenAuthority called - returning unimplemented");
+                // Token-based auth not supported - return error to make BuildKit fall back
+                // BuildKit requires either a valid pubkey or error to properly fallback to Credentials
+                tracing::info!("Auth.GetTokenAuthority called - returning not implemented");
                 self.send_error_response(respond, "Token auth not implemented").await
             }
             "/moby.filesync.v1.Auth/Credentials" => {
@@ -105,6 +108,11 @@ impl GrpcTunnel {
             "/moby.filesync.v1.Auth/FetchToken" => {
                 let payload = Self::read_unary_request(body).await?;
                 let response_payload = self.handle_auth_fetch_token(payload).await?;
+                self.send_success_response(respond, response_payload).await
+            }
+            "/moby.buildkit.secrets.v1.Secrets/GetSecret" => {
+                let payload = Self::read_unary_request(body).await?;
+                let response_payload = self.handle_secrets_get_secret(payload).await?;
                 self.send_success_response(respond, response_payload).await
             }
             _ => {
@@ -228,13 +236,85 @@ impl GrpcTunnel {
         let root_path = file_sync.get_root_path();
         tracing::info!("Starting to send directory STAT packets from: {}", root_path.display());
 
-        // First, send all STAT packets (file metadata only, no data)
-        // IDs start from 0 in fsutil protocol
+        // First, collect all entries recursively
+        let mut entries = Vec::new();
+        if let Err(e) = Self::collect_entries_recursive(root_path.clone(), String::new(), &mut entries).await {
+            tracing::error!("Error collecting entries: {}", e);
+            let trailers = Response::builder()
+                .header("grpc-status", "2")
+                .header("grpc-message", e.to_string())
+                .body(())
+                .unwrap();
+            let _ = send_stream.send_trailers(trailers.headers().clone());
+            return Err(e);
+        }
+
+        // Debug: log entries before sorting
+        eprintln!("DEBUG: Collected {} entries before sorting", entries.len());
+        for (path, _, _) in &entries {
+            eprintln!("DEBUG: Entry: {}", path);
+        }
+
+        // Sort all entries by their relative path (fsutil requires lexicographic order)
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Debug: log entries after sorting
+        eprintln!("DEBUG: Entries after sorting:");
+        for (path, _, _) in &entries {
+            eprintln!("DEBUG: Sorted: {}", path);
+        }
+
+        // Send STAT packets in sorted order and build file map
+        use std::collections::HashMap;
+        let mut file_map = HashMap::new();
         let mut id_counter = 0u32;
-        let file_map = match Self::collect_and_send_stats(root_path.clone(), String::new(), &mut send_stream, &mut id_counter).await {
-            Ok(map) => map,
-            Err(e) => {
-                tracing::error!("Error sending STAT packets: {}", e);
+        for (rel_path, entry_path, metadata) in entries {
+            let entry_id = id_counter;
+            id_counter += 1;
+
+            use crate::proto::fsutil::types::{Packet, packet::PacketType, Stat};
+
+            // Create stat packet
+            let mut stat = Stat {
+                path: rel_path.clone(),
+                mode: 0,
+                uid: 0,
+                gid: 0,
+                size: metadata.len() as i64,
+                mod_time: 0,
+                linkname: String::new(),
+                devmajor: 0,
+                devminor: 0,
+                xattrs: std::collections::HashMap::new(),
+            };
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                stat.mode = metadata.permissions().mode();
+            }
+
+            #[cfg(not(unix))]
+            {
+                stat.mode = if metadata.is_dir() {
+                    0o040755  // S_IFDIR | 0o755
+                } else {
+                    0o100644  // S_IFREG | 0o644
+                };
+            }
+
+            let mode = stat.mode;
+            let stat_packet = Packet {
+                r#type: PacketType::PacketStat as i32,
+                stat: Some(stat),
+                id: entry_id,
+                data: vec![],
+            };
+
+            // Send stat packet
+            tracing::info!("Sending STAT packet for: {} (id: {}, mode: 0o{:o})", rel_path, entry_id, mode);
+            if let Err(e) = Self::send_grpc_packet(&mut send_stream, &stat_packet).await {
+                tracing::error!("Error sending STAT packet: {}", e);
                 let trailers = Response::builder()
                     .header("grpc-status", "2")
                     .header("grpc-message", e.to_string())
@@ -243,7 +323,12 @@ impl GrpcTunnel {
                 let _ = send_stream.send_trailers(trailers.headers().clone());
                 return Err(e);
             }
-        };
+
+            // Store file path in map for later data requests (only for files)
+            if metadata.is_file() {
+                file_map.insert(entry_id, entry_path);
+            }
+        }
 
         // Send final empty STAT packet to indicate end of stats (as done in fsutil send.go line 182)
         let final_stat_packet = Packet {
@@ -369,24 +454,15 @@ impl GrpcTunnel {
         Ok(())
     }
 
-    /// Collect files and send STAT packets only (no data), return map of id -> file_path
-    fn collect_and_send_stats<'a>(
+    /// Recursively collect all entries (files and directories) from a path
+    /// Returns a vector of (relative_path, absolute_path, metadata) tuples
+    fn collect_entries_recursive<'a>(
         path: std::path::PathBuf,
         prefix: String,
-        stream: &'a mut h2::SendStream<Bytes>,
-        id_counter: &'a mut u32,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<std::collections::HashMap<u32, std::path::PathBuf>>> + Send + 'a>> {
+        result: &'a mut Vec<(String, std::path::PathBuf, std::fs::Metadata)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
         Box::pin(async move {
-            use crate::proto::fsutil::types::{Packet, packet::PacketType, Stat};
-            use std::collections::HashMap;
-
-            let mut file_map = HashMap::new();
-
-            tracing::debug!("Reading directory for STAT: {} (prefix: {})", path.display(), prefix);
-
-            // Note: We don't send a STAT packet for the root directory itself,
-            // only for its children. This matches fsutil's behavior where the
-            // walk starts with directory contents, not the directory itself.
+            tracing::debug!("Collecting entries from: {} (prefix: {})", path.display(), prefix);
 
             let mut entries = tokio::fs::read_dir(&path).await
                 .with_context(|| format!("Failed to read directory {}", path.display()))?;
@@ -403,64 +479,16 @@ impl GrpcTunnel {
                 let entry_path = entry.path();
                 let metadata = entry.metadata().await?;
 
-                // Assign sequential ID for this entry (fsutil assigns IDs to ALL entries)
-                let entry_id = *id_counter;
-                *id_counter += 1;
-
-                // Create stat packet
-                let mut stat = Stat {
-                    path: rel_path.clone(),
-                    mode: 0,
-                    uid: 0,
-                    gid: 0,
-                    size: metadata.len() as i64,
-                    mod_time: 0,
-                    linkname: String::new(),
-                    devmajor: 0,
-                    devminor: 0,
-                    xattrs: std::collections::HashMap::new(),
-                };
-
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    stat.mode = metadata.permissions().mode();
-                }
-
-                #[cfg(not(unix))]
-                {
-                    stat.mode = if metadata.is_dir() {
-                        0o040755  // S_IFDIR | 0o755
-                    } else {
-                        0o100644  // S_IFREG | 0o644
-                    };
-                }
-
-                let mode = stat.mode;
-                let stat_packet = Packet {
-                    r#type: PacketType::PacketStat as i32,
-                    stat: Some(stat),
-                    id: entry_id,
-                    data: vec![],
-                };
-
-                // Send stat packet
-                tracing::debug!("Sending STAT packet for: {} (id: {}, mode: 0o{:o})", rel_path, entry_id, mode);
-                Self::send_grpc_packet(stream, &stat_packet).await?;
-
-                // Store file path in map for later data requests (only for files)
-                if metadata.is_file() {
-                    file_map.insert(entry_id, entry_path.clone());
-                }
+                // Add this entry to result
+                result.push((rel_path.clone(), entry_path.clone(), metadata.clone()));
 
                 // Recursively handle directories
                 if metadata.is_dir() {
-                    let sub_map = Self::collect_and_send_stats(entry_path, rel_path, stream, id_counter).await?;
-                    file_map.extend(sub_map);
+                    Self::collect_entries_recursive(entry_path, rel_path, result).await?;
                 }
             }
 
-            Ok(file_map)
+            Ok(())
         })
     }
 
@@ -562,24 +590,40 @@ impl GrpcTunnel {
 
     /// Handle Auth.Credentials request
     async fn handle_auth_credentials(&self, payload: Bytes) -> Result<Bytes> {
-        use crate::proto::moby::filesync::v1::{CredentialsRequest, CredentialsResponse};
+        use crate::proto::moby::filesync::v1::CredentialsRequest;
+        use tonic::Request;
+        use crate::proto::moby::filesync::v1::auth_server::Auth;
 
         let request = CredentialsRequest::decode(payload)
             .context("Failed to decode CredentialsRequest")?;
 
         tracing::info!("Auth.Credentials request for host: {}", request.host);
 
-        // If auth is not configured, return empty credentials
-        // BuildKit will proceed without authentication
+        // Use AuthServer if configured, otherwise return empty credentials
         let response = if let Some(auth) = &self.auth {
-            // TODO: Implement proper auth credential lookup
-            tracing::debug!("Auth configured, but returning empty credentials for now");
-            CredentialsResponse {
-                username: String::new(),
-                secret: String::new(),
+            match auth.credentials(Request::new(request.clone())).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    if !inner.username.is_empty() {
+                        tracing::debug!("Returning credentials for host: {} (username: {})",
+                            request.host, inner.username);
+                    } else {
+                        tracing::debug!("No credentials found for host: {}, returning empty", request.host);
+                    }
+                    inner
+                }
+                Err(status) => {
+                    tracing::warn!("Failed to get credentials: {}, returning empty", status.message());
+                    use crate::proto::moby::filesync::v1::CredentialsResponse;
+                    CredentialsResponse {
+                        username: String::new(),
+                        secret: String::new(),
+                    }
+                }
             }
         } else {
             tracing::debug!("No auth configured, returning empty credentials");
+            use crate::proto::moby::filesync::v1::CredentialsResponse;
             CredentialsResponse {
                 username: String::new(),
                 secret: String::new(),
@@ -601,6 +645,42 @@ impl GrpcTunnel {
             token: String::new(),
             expires_in: 0,
             issued_at: 0,
+        };
+
+        let mut buf = Vec::new();
+        response.encode(&mut buf)?;
+        Ok(Bytes::from(buf))
+    }
+
+    /// Handle Secrets.GetSecret request
+    async fn handle_secrets_get_secret(&self, payload: Bytes) -> Result<Bytes> {
+        use crate::proto::moby::secrets::v1::GetSecretRequest;
+
+        let request = GetSecretRequest::decode(payload)
+            .context("Failed to decode GetSecretRequest")?;
+
+        tracing::info!("Secrets.GetSecret request for ID: {}", request.id);
+
+        // If secrets service is not configured, return empty data
+        let response = if let Some(secrets) = &self.secrets {
+            // Use the SecretsServer's get_secret implementation through the Secrets trait
+            use tonic::Request;
+            use crate::proto::moby::secrets::v1::secrets_server::Secrets;
+
+            match secrets.get_secret(Request::new(request.clone())).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    tracing::debug!("Returning secret '{}' ({} bytes)", request.id, inner.data.len());
+                    inner
+                }
+                Err(status) => {
+                    tracing::warn!("Secret '{}' not found: {}", request.id, status.message());
+                    return Err(anyhow::anyhow!("Secret not found: {}", status.message()));
+                }
+            }
+        } else {
+            tracing::warn!("Secrets service not configured");
+            return Err(anyhow::anyhow!("Secrets service not configured"));
         };
 
         let mut buf = Vec::new();

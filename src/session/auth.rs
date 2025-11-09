@@ -10,26 +10,60 @@ use crate::proto::moby::filesync::v1::{
 };
 
 /// Registry authentication configuration
+///
+/// Stores credentials for authenticating with container registries.
 #[derive(Debug, Clone)]
 pub struct RegistryAuthConfig {
+    /// Registry hostname (e.g., "docker.io", "ghcr.io", "localhost:5000")
     pub host: String,
+    /// Username for registry authentication
     pub username: String,
+    /// Password or access token for registry authentication
     pub password: String,
 }
 
-/// Auth server implementation
+/// Auth server implementation for BuildKit session
+///
+/// Handles registry authentication requests during image push operations.
 #[derive(Debug, Clone, Default)]
 pub struct AuthServer {
     registries: Vec<RegistryAuthConfig>,
 }
 
 impl AuthServer {
+    /// Create a new authentication server
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use buildkit_client::session::AuthServer;
+    ///
+    /// let auth = AuthServer::new();
+    /// ```
     pub fn new() -> Self {
         Self {
             registries: Vec::new(),
         }
     }
 
+    /// Add registry credentials
+    ///
+    /// # Arguments
+    ///
+    /// * `config` - Registry authentication configuration
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use buildkit_client::session::{AuthServer, RegistryAuthConfig};
+    ///
+    /// let mut auth = AuthServer::new();
+    /// auth.add_registry(RegistryAuthConfig {
+    ///     host: "docker.io".to_string(),
+    ///     username: "myuser".to_string(),
+    ///     password: "mytoken".to_string(),
+    /// });
+    /// ```
     pub fn add_registry(&mut self, config: RegistryAuthConfig) {
         self.registries.push(config);
     }

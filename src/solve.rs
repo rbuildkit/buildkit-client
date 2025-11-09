@@ -60,6 +60,14 @@ impl BuildKitClient {
             session.add_auth(auth).await;
         }
 
+        // Add secrets if provided
+        if !config.secrets.is_empty() {
+            let secrets = crate::session::SecretsServer::from_map(config.secrets.clone())
+                .map_err(|e| anyhow::anyhow!("Failed to create secrets server: {}", e))?;
+            session.add_secrets(secrets).await;
+            tracing::debug!("Added {} secrets to session", config.secrets.len());
+        }
+
         // Start the session by connecting to BuildKit
         session.start(self.control().clone()).await
             .context("Failed to start session")?;

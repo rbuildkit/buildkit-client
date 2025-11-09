@@ -16,7 +16,7 @@ pub enum DockerfileSource {
     },
     /// GitHub repository
     GitHub {
-        /// Repository URL (e.g., "https://github.com/user/repo.git")
+        /// Repository URL (e.g., "<https://github.com/user/repo.git>")
         repo_url: String,
         /// Git reference (branch, tag, or commit SHA)
         git_ref: Option<String>,

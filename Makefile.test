@@ -1,0 +1,159 @@
+# Testing Makefile for buildkit-client
+# Include this in your main Makefile or use directly: make -f Makefile.test <target>
+
+.PHONY: test test-unit test-integration test-all test-watch
+.PHONY: bench coverage clean-test
+.PHONY: buildkit-start buildkit-stop buildkit-check
+
+# Test commands
+test: test-unit ## Run unit tests only
+
+test-unit: ## Run unit tests (no BuildKit required)
+	@echo "Running unit tests..."
+	@cargo test --lib
+	@cargo test --test builder_test
+	@cargo test --test session_test
+	@cargo test --test progress_test
+	@cargo test --test proto_test
+
+test-integration: ## Run integration tests (requires BuildKit)
+	@echo "Running integration tests..."
+	@cargo test --test integration_test -- --test-threads=1
+
+test-github: ## Run GitHub repository tests (requires BuildKit)
+	@echo "Running GitHub repository tests..."
+	@if [ -z "$$GITHUB_TOKEN" ]; then \
+		echo "Warning: GITHUB_TOKEN not set. Using default token for private repo tests."; \
+	fi
+	@cargo test --test integration_test github -- --test-threads=1
+
+test-all: ## Run all tests (unit + integration)
+	@echo "Running all tests..."
+	@cargo test --lib
+	@cargo test --test builder_test
+	@cargo test --test session_test
+	@cargo test --test progress_test
+	@cargo test --test proto_test
+	@cargo test --test integration_test -- --test-threads=1
+
+test-watch: ## Run tests in watch mode (requires cargo-watch)
+	@command -v cargo-watch >/dev/null 2>&1 || (echo "Installing cargo-watch..." && cargo install cargo-watch)
+	@cargo watch -x test
+
+test-ignored: ## Run ignored tests (slow tests)
+	@echo "Running ignored tests..."
+	@cargo test --test integration_test -- --ignored --test-threads=1
+
+# Benchmarks
+bench: ## Run benchmarks
+	@echo "Running benchmarks..."
+	@cargo bench --bench build_bench
+
+bench-save: ## Run benchmarks and save baseline
+	@echo "Running benchmarks and saving baseline..."
+	@cargo bench --bench build_bench -- --save-baseline current
+
+bench-compare: ## Run benchmarks and compare with baseline
+	@echo "Running benchmarks and comparing with baseline..."
+	@cargo bench --bench build_bench -- --baseline current
+
+# Coverage
+coverage: ## Generate test coverage report
+	@command -v cargo-tarpaulin >/dev/null 2>&1 || (echo "Installing cargo-tarpaulin..." && cargo install cargo-tarpaulin)
+	@echo "Generating coverage report..."
+	@cargo tarpaulin --verbose --all-features --workspace --timeout 300 --out Html --output-dir coverage
+	@echo "Coverage report generated: coverage/index.html"
+
+coverage-ci: ## Generate coverage report for CI (XML format)
+	@cargo tarpaulin --verbose --all-features --workspace --timeout 300 --out Xml
+
+# BuildKit management
+buildkit-start: ## Start BuildKit using docker-compose
+	@echo "Starting BuildKit..."
+	@if [ -f docker-compose.yml ]; then \
+		docker-compose up -d buildkit; \
+	else \
+		docker run -d --name buildkit-test --rm --privileged -p 1234:1234 moby/buildkit:latest --addr tcp://0.0.0.0:1234; \
+	fi
+	@sleep 5
+	@$(MAKE) -f Makefile.test buildkit-check
+
+buildkit-stop: ## Stop BuildKit
+	@echo "Stopping BuildKit..."
+	@if [ -f docker-compose.yml ]; then \
+		docker-compose stop buildkit; \
+	else \
+		docker stop buildkit-test 2>/dev/null || true; \
+	fi
+
+buildkit-check: ## Check if BuildKit is running
+	@echo "Checking BuildKit status..."
+	@if curl -f http://localhost:1234/healthz >/dev/null 2>&1; then \
+		echo "✓ BuildKit is running"; \
+	else \
+		echo "✗ BuildKit is not running"; \
+		exit 1; \
+	fi
+
+buildkit-logs: ## Show BuildKit logs
+	@if [ -f docker-compose.yml ]; then \
+		docker-compose logs -f buildkit; \
+	else \
+		docker logs -f buildkit-test; \
+	fi
+
+# Quality checks
+fmt: ## Check code formatting
+	@echo "Checking formatting..."
+	@cargo fmt -- --check
+
+fmt-fix: ## Fix code formatting
+	@echo "Fixing formatting..."
+	@cargo fmt
+
+clippy: ## Run clippy linter
+	@echo "Running clippy..."
+	@cargo clippy --all-targets --all-features -- -D warnings
+
+check: fmt clippy test-unit ## Run format, clippy, and unit tests
+
+# Clean
+clean-test: ## Clean test artifacts
+	@echo "Cleaning test artifacts..."
+	@cargo clean
+	@rm -rf /tmp/buildkit-test-*
+	@rm -rf coverage/
+	@rm -f cobertura.xml
+
+# CI simulation
+ci: ## Run all checks like CI (format, clippy, tests)
+	@echo "=== Running CI checks ==="
+	@$(MAKE) -f Makefile.test fmt
+	@$(MAKE) -f Makefile.test clippy
+	@$(MAKE) -f Makefile.test test-unit
+	@$(MAKE) -f Makefile.test buildkit-check
+	@$(MAKE) -f Makefile.test test-integration
+	@echo "=== All CI checks passed ==="
+
+# Debug helpers
+test-verbose: ## Run tests with verbose output
+	@cargo test --verbose -- --nocapture
+
+test-single: ## Run a single test (usage: make test-single TEST=test_name)
+	@test -n "$(TEST)" || (echo "Usage: make test-single TEST=test_name" && exit 1)
+	@cargo test $(TEST) -- --nocapture
+
+test-debug: ## Run tests with debug logging
+	@RUST_LOG=debug cargo test -- --nocapture
+
+# Documentation
+test-doc: ## Test documentation examples
+	@echo "Testing documentation examples..."
+	@cargo test --doc
+
+# Help
+help: ## Show this help message
+	@echo "Available targets:"
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+
+.DEFAULT_GOAL := help

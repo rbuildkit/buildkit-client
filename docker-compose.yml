@@ -1,42 +1,39 @@
-version: '3.8'
+name: buildkit-client
 
 services:
-  # BuildKit daemon
   buildkitd:
     image: moby/buildkit:latest
-    container_name: buildkitd
     privileged: true
     ports:
       - "1234:1234"
     command:
       - --addr
       - tcp://0.0.0.0:1234
+      - --config
+      - /etc/buildkit/buildkitd.toml
     volumes:
-      # 持久化缓存
       - buildkit-cache:/var/lib/buildkit
-      # Mount current directory for local builds
-      - ${PWD}:${PWD}
-    working_dir: ${PWD}
-    networks:
-      - buildkit-net
+    configs:
+      - source: buildkitd_config
+        target: /etc/buildkit/buildkitd.toml
 
   # Local Docker Registry for testing
   registry:
     image: registry:2
-    container_name: local-registry
     ports:
       - "5000:5000"
     environment:
       REGISTRY_STORAGE_FILESYSTEM_ROOTDIRECTORY: /data
     volumes:
       - registry-data:/data
-    networks:
-      - buildkit-net
+
 
 volumes:
   buildkit-cache:
   registry-data:
 
-networks:
-  buildkit-net:
-    driver: bridge
+configs:
+  buildkitd_config:
+    content: |
+      [registry."registry:5000"]
+        http = true

@@ -1,52 +1,96 @@
 # BuildKit Rust Client
 
-一个功能完整的 Rust 客户端，用于通过 gRPC 与 moby/buildkit 交互，构建容器镜像。
+<div align="center">
 
-## 特性
+[![Crates.io](https://img.shields.io/crates/v/buildkit-client?style=flat-square)](https://crates.io/crates/buildkit-client)
+[![Documentation](https://img.shields.io/docsrs/buildkit-client?style=flat-square)](https://docs.rs/buildkit-client)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue?style=flat-square)](#license)
+[![Rust Version](https://img.shields.io/badge/rust-1.70%2B-orange?style=flat-square)](https://www.rust-lang.org)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/corespeed-io/buildkit-client/ci.yml?style=flat-square)](https://github.com/corespeed-io/buildkit-client/actions)
+[![codecov](https://img.shields.io/codecov/c/github/corespeed-io/buildkit-client?style=flat-square)](https://codecov.io/gh/corespeed-io/buildkit-client)
 
-- ✅ **完整的 gRPC 实现** - 直接使用 BuildKit 的 gRPC API
-- 🏗️ **多种构建源** - 支持本地 Dockerfile 和 GitHub 仓库
-- 🔐 **认证支持** - 支持 GitHub 私有仓库和 Docker Registry 认证
-- 🚀 **高级构建选项** - Build args、target stage、multi-platform builds
-- 📊 **实时进度** - 实时显示构建进度和日志
-- 💾 **缓存管理** - 支持 cache import/export
-- 🎯 **推送到 Registry** - 自动推送构建好的镜像
+A full-featured Rust client library and CLI for interacting with [moby/buildkit](https://github.com/moby/buildkit) to build container images via gRPC.
 
-## 前置要求
+[Features](#features) •
+[Installation](#installation) •
+[Quick Start](#quick-start) •
+[Usage](#usage) •
+[Documentation](#documentation) •
+[Contributing](#contributing)
+
+</div>
+
+---
+
+## Features
+
+- ✅ **Complete gRPC Implementation** - Direct integration with BuildKit's gRPC API
+- 🏗️ **Multiple Build Sources** - Support for local Dockerfiles and GitHub repositories
+- 🔐 **Authentication Support** - GitHub private repositories and Docker Registry authentication
+- 🚀 **Advanced Build Options** - Build args, target stages, multi-platform builds
+- 📊 **Real-time Progress** - Live build progress and log streaming
+- 💾 **Cache Management** - Support for cache import/export
+- 🎯 **Registry Push** - Automatic push of built images to registries
+- 🔄 **Session Protocol** - Full implementation of BuildKit's bidirectional session protocol
+- 🌐 **HTTP/2 Tunneling** - HTTP/2-over-gRPC for file synchronization
+
+## Prerequisites
 
 - Rust 1.70+
-- Docker 或 BuildKit daemon
-- Git（用于拉取 proto 文件）
+- Docker or BuildKit daemon
+- Git (for fetching proto files)
 
-## 快速开始
+## Installation
 
-### 0. 初始化 Proto 文件
+### As a Library
 
-首次使用需要拉取 protobuf 定义文件：
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+buildkit-client = "0.1"
+tokio = { version = "1", features = ["full"] }
+anyhow = "1.0"
+```
+
+### As a CLI Tool
+
+```bash
+git clone https://github.com/corespeed-io/buildkit-client.git
+cd buildkit-client
+./scripts/init-proto.sh
+cargo install --path .
+```
+
+## Quick Start
+
+### 0. Initialize Proto Files
+
+First-time setup requires fetching protobuf definitions:
 
 ```bash
 ./scripts/init-proto.sh
 ```
 
-> 详细说明请查看 [PROTO_SETUP.md](./PROTO_SETUP.md)
+> For detailed instructions, see [docs/PROTO_SETUP.md](./docs/PROTO_SETUP.md)
 
-### 1. 启动 BuildKit 和 Registry
+### 1. Start BuildKit and Registry
 
 ```bash
 docker-compose up -d
 ```
 
-这将启动：
-- BuildKit daemon (端口 1234)
-- 本地 Docker Registry (端口 5000)
+This starts:
+- BuildKit daemon (port 1234)
+- Local Docker Registry (port 5000)
 
-### 2. 编译项目
+### 2. Build the Project
 
 ```bash
 cargo build --release
 ```
 
-### 3. 运行示例
+### 3. Run Examples
 
 #### Health Check
 
@@ -54,7 +98,7 @@ cargo build --release
 cargo run -- health
 ```
 
-#### 构建本地 Dockerfile
+#### Build Local Dockerfile
 
 ```bash
 cargo run -- local \
@@ -62,7 +106,7 @@ cargo run -- local \
   --tag localhost:5000/test:latest
 ```
 
-#### 使用 Build Arguments
+#### Using Build Arguments
 
 ```bash
 cargo run -- local \
@@ -72,7 +116,7 @@ cargo run -- local \
   --build-arg BUILD_DATE=$(date +%Y-%m-%d)
 ```
 
-#### 指定 Target Stage
+#### Specify Target Stage
 
 ```bash
 cargo run -- local \
@@ -81,7 +125,7 @@ cargo run -- local \
   --target dev
 ```
 
-#### 多平台构建
+#### Multi-platform Build
 
 ```bash
 cargo run -- local \
@@ -91,22 +135,22 @@ cargo run -- local \
   --platform linux/arm64
 ```
 
-#### 从 GitHub 仓库构建
+#### Build from GitHub Repository
 
 ```bash
-# 公开仓库
+# Public repository
 cargo run -- github https://github.com/user/repo.git \
   --tag localhost:5000/from-github:latest \
   --git-ref main
 
-# 私有仓库（使用环境变量）
+# Private repository (with environment variable)
 export GITHUB_TOKEN=ghp_your_token_here
 cargo run -- github https://github.com/user/private-repo.git \
   --tag localhost:5000/private:latest \
   --git-ref main
 ```
 
-#### 带 Registry 认证的构建
+#### Build with Registry Authentication
 
 ```bash
 cargo run -- local \
@@ -117,7 +161,7 @@ cargo run -- local \
   --registry-password mypassword
 ```
 
-#### JSON 输出模式
+#### JSON Output Mode
 
 ```bash
 cargo run -- local \
@@ -126,18 +170,9 @@ cargo run -- local \
   --json
 ```
 
-## 作为库使用
+## Usage
 
-在 `Cargo.toml` 中添加：
-
-```toml
-[dependencies]
-buildkit-client = { path = "." }
-tokio = { version = "1", features = ["full"] }
-anyhow = "1.0"
-```
-
-### 基本示例
+### Basic Example
 
 ```rust
 use buildkit_client::{BuildKitClient, BuildConfig};
@@ -145,15 +180,15 @@ use buildkit_client::progress::ConsoleProgressHandler;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 连接到 BuildKit
+    // Connect to BuildKit
     let mut client = BuildKitClient::connect("http://localhost:1234").await?;
 
-    // 配置构建
+    // Configure build
     let config = BuildConfig::local("./my-app")
         .tag("localhost:5000/my-app:latest")
         .build_arg("VERSION", "1.0.0");
 
-    // 执行构建
+    // Execute build
     let progress = Box::new(ConsoleProgressHandler::new(true));
     let result = client.build(config, Some(progress)).await?;
 
@@ -166,7 +201,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### GitHub 仓库构建
+### GitHub Repository Build
 
 ```rust
 use buildkit_client::{BuildKitClient, BuildConfig, RegistryAuth};
@@ -187,7 +222,7 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-### 多平台构建
+### Multi-platform Build
 
 ```rust
 use buildkit_client::{BuildKitClient, BuildConfig, Platform};
@@ -207,82 +242,98 @@ async fn main() -> anyhow::Result<()> {
 }
 ```
 
-## 项目结构
+## Project Structure
 
 ```
 buildkit-client/
 ├── src/
-│   ├── main.rs          # CLI 工具入口
-│   ├── lib.rs           # 库入口
-│   ├── client.rs        # BuildKit gRPC 客户端
-│   ├── builder.rs       # 构建配置
-│   ├── solve.rs         # 构建执行逻辑
-│   ├── progress.rs      # 进度处理
-│   └── proto.rs         # Protobuf 生成代码
-├── proto/               # BuildKit protobuf 定义
-├── examples/            # 示例 Dockerfile
-├── docker-compose.yml   # 测试环境配置
+│   ├── main.rs          # CLI tool entry point
+│   ├── lib.rs           # Library entry point
+│   ├── client.rs        # BuildKit gRPC client
+│   ├── builder.rs       # Build configuration
+│   ├── solve.rs         # Build execution logic
+│   ├── progress.rs      # Progress handling
+│   ├── session/         # Session protocol implementation
+│   │   ├── mod.rs       # Session lifecycle & metadata
+│   │   ├── grpc_tunnel.rs  # HTTP/2-over-gRPC tunnel
+│   │   ├── filesync.rs  # File synchronization
+│   │   └── auth.rs      # Registry authentication
+│   └── proto.rs         # Protobuf generated code
+├── proto/               # BuildKit protobuf definitions
+├── examples/            # Sample Dockerfiles
+├── tests/               # Comprehensive test suite
+├── docker-compose.yml   # Test environment setup
 └── README.md
 ```
 
 ## BuildKit gRPC API
 
-本项目直接使用 BuildKit 的 gRPC API：
+This project directly uses BuildKit's gRPC API:
 
-- `Control.Solve` - 执行构建操作
-- `Control.Status` - 获取构建状态流
-- `Control.Info` - 获取 BuildKit 信息
+- `Control.Solve` - Execute build operations
+- `Control.Status` - Stream build status updates
+- `Control.Info` - Get BuildKit information
+- `Control.Session` - Bidirectional session stream
 
-所有的 protobuf 定义都从 [moby/buildkit](https://github.com/moby/buildkit) 仓库获取。
+All protobuf definitions are fetched from the [moby/buildkit](https://github.com/moby/buildkit) repository.
 
-## 配置选项
+## Configuration Options
 
 ### BuildConfig
 
-- `source` - 构建源（本地或 GitHub）
-- `dockerfile_path` - Dockerfile 路径
-- `build_args` - 构建参数
-- `target` - 目标 stage
-- `platforms` - 目标平台列表
-- `tags` - 镜像标签列表
-- `registry_auth` - Registry 认证信息
-- `cache_from` - 缓存导入源
-- `cache_to` - 缓存导出目标
-- `secrets` - 构建时使用的 secrets
-- `no_cache` - 禁用缓存
-- `pull` - 总是拉取基础镜像
+- `source` - Build source (local or GitHub)
+- `dockerfile_path` - Path to Dockerfile
+- `build_args` - Build arguments
+- `target` - Target stage
+- `platforms` - List of target platforms
+- `tags` - List of image tags
+- `registry_auth` - Registry authentication info
+- `cache_from` - Cache import sources
+- `cache_to` - Cache export destinations
+- `secrets` - Build-time secrets
+- `no_cache` - Disable caching
+- `pull` - Always pull base images
 
 ### ProgressHandler
 
-提供了三种进度处理器：
+Three progress handlers are provided:
 
-1. **ConsoleProgressHandler** - 输出到控制台
-2. **JsonProgressHandler** - JSON 格式输出
-3. **SilentProgressHandler** - 静默模式
+1. **ConsoleProgressHandler** - Output to console with colors
+2. **JsonProgressHandler** - JSON format output
+3. **SilentProgressHandler** - Silent mode
 
-## 环境变量
+## Environment Variables
 
-- `GITHUB_TOKEN` - GitHub 认证令牌
-- `RUST_LOG` - 日志级别 (trace, debug, info, warn, error)
+- `BUILDKIT_ADDR` - BuildKit address (default: `http://localhost:1234`)
+- `GITHUB_TOKEN` - GitHub authentication token
+- `RUST_LOG` - Log level (trace, debug, info, warn, error)
+  - `RUST_LOG=info,buildkit_client::session::grpc_tunnel=trace` for protocol debugging
 
-## 故障排除
+## Documentation
 
-### BuildKit 连接失败
+- **[Quick Start Guide](./docs/QUICK_START.md)** - Get up and running quickly
+- **[Proto Setup](./docs/PROTO_SETUP.md)** - Proto file management
+- **[Testing Guide](./docs/TESTING.md)** - Complete testing documentation (unit, integration, GitHub builds)
+- **[Development Guide](./CLAUDE.md)** - Architecture and development guide
+
+## Troubleshooting
+
+### BuildKit Connection Failed
 
 ```bash
-# 检查 BuildKit 是否运行
+# Check if BuildKit is running
 docker-compose ps
 
-# 查看 BuildKit 日志
+# View BuildKit logs
 docker-compose logs buildkitd
 
-# 重启服务
+# Restart services
 docker-compose restart
 ```
 
-### Registry 推送失败
+### Registry Push Failed
 
-确保 registry 允许 insecure 连接（对于 localhost）：
+Ensure the registry allows insecure connections (for localhost):
 
 ```yaml
 # docker-compose.yml
@@ -292,86 +343,147 @@ services:
       - BUILDKIT_REGISTRY_INSECURE=true
 ```
 
-### Proto 编译错误
+### Proto Compilation Errors
 
-如果遇到 protobuf 编译错误：
+If you encounter protobuf compilation errors:
 
 ```bash
-# 清理 proto 文件并重新初始化
+# Clean proto files and reinitialize
 make proto-clean
 make proto-init
 
-# 或者手动执行
+# Or manually
 rm -rf proto
 ./scripts/init-proto.sh
 
-# 清理并重新编译
+# Clean and rebuild
 cargo clean
 cargo build
 ```
 
-## 开发
+## Development
 
-### 使用 Makefile
+### Using Makefile
 
-项目提供了 Makefile 简化常用操作：
+The project provides a Makefile to simplify common operations:
 
 ```bash
-make help          # 显示所有可用命令
-make init          # 初始化项目（拉取 proto 和构建）
-make build         # 构建项目
-make test          # 运行测试
-make up            # 启动 docker-compose
-make down          # 停止 docker-compose
-make health        # 检查 BuildKit 健康状态
+make help          # Show all available commands
+make init          # Initialize project (fetch proto and build)
+make build         # Build project
+make test          # Run tests
+make up            # Start docker-compose services
+make down          # Stop docker-compose services
+make health        # Check BuildKit health status
 ```
 
-### 更新 Protobuf 定义
-
-Proto 文件通过脚本自动管理，更新步骤：
+### Testing
 
 ```bash
-# 方法 1: 使用 Makefile
+# Unit tests
+cargo test --lib
+
+# Integration tests (requires BuildKit)
+cargo test --test integration_test -- --test-threads=1
+
+# All tests
+./scripts/test.sh all
+
+# GitHub repository tests
+GITHUB_TOKEN=your_token cargo test --test integration_test github -- --test-threads=1
+```
+
+### Update Protobuf Definitions
+
+Proto files are automatically managed via scripts:
+
+```bash
+# Method 1: Using Makefile
 make proto-clean
 make proto-init
 
-# 方法 2: 手动执行
+# Method 2: Manual execution
 rm -rf proto
 ./scripts/init-proto.sh
 
-# 重新构建
+# Rebuild
 cargo build
 ```
 
-### 运行测试
-
-```bash
-cargo test
-```
-
-### 代码格式化
+### Code Formatting
 
 ```bash
 cargo fmt
 cargo clippy
 ```
 
-## 许可证
+### Benchmarks
 
-本项目采用 MIT 或 Apache-2.0 双许可证。
+```bash
+cargo bench
+```
 
-## 致谢
+## Architecture Highlights
 
-- [moby/buildkit](https://github.com/moby/buildkit) - BuildKit 项目
-- [tonic](https://github.com/hyperium/tonic) - Rust gRPC 库
-- [prost](https://github.com/tokio-rs/prost) - Protocol Buffers 实现
+### Session Protocol
 
-## 贡献
+Implements BuildKit's complete session protocol with:
+- Bidirectional gRPC streaming
+- HTTP/2-over-gRPC tunneling for callbacks
+- File synchronization (DiffCopy protocol)
+- Registry authentication
 
-欢迎提交 Issue 和 Pull Request！
+### HTTP/2 Tunnel
 
-## 相关链接
+The HTTP/2-over-gRPC tunnel (`src/session/grpc_tunnel.rs`) is the most complex component:
+- Runs a complete gRPC server inside a gRPC stream
+- Routes incoming calls to appropriate handlers
+- Implements proper gRPC message framing
 
-- [BuildKit 文档](https://github.com/moby/buildkit/tree/master/docs)
-- [BuildKit API 参考](https://github.com/moby/buildkit/tree/master/api)
+### DiffCopy Protocol
+
+Bidirectional file synchronization protocol:
+- Server sends STAT packets (file metadata)
+- Client sends REQ packets (file requests)
+- Server sends DATA packets (file contents)
+- Both send FIN when complete
+
+For detailed architecture documentation, see [CLAUDE.md](./CLAUDE.md).
+
+## License
+
+This project is dual-licensed under MIT OR Apache-2.0.
+
+## Acknowledgments
+
+- [moby/buildkit](https://github.com/moby/buildkit) - BuildKit project
+- [tonic](https://github.com/hyperium/tonic) - Rust gRPC library
+- [prost](https://github.com/tokio-rs/prost) - Protocol Buffers implementation
+- [h2](https://github.com/hyperium/h2) - HTTP/2 implementation
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit Issues and Pull Requests.
+
+Before submitting a PR:
+1. Run `cargo fmt` and `cargo clippy`
+2. Ensure all tests pass: `cargo test`
+3. Add tests for new features
+4. Update documentation as needed
+
+## Related Links
+
+- [BuildKit Documentation](https://github.com/moby/buildkit/tree/master/docs)
+- [BuildKit API Reference](https://github.com/moby/buildkit/tree/master/api)
 - [Docker Buildx](https://github.com/docker/buildx)
+- [Container Image Specification](https://github.com/opencontainers/image-spec)
+
+---
+
+<div align="center">
+
+**[⬆ back to top](#buildkit-rust-client)**
+
+Made with ❤️ by AprilNEA
+
+</div>

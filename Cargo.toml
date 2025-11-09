@@ -34,6 +34,15 @@ rand = "0.8"
 h2 = "0.4"
 http = "1.0"
 
+[dev-dependencies]
+# Testing
+criterion = { version = "0.5", features = ["async_tokio"] }
+tempfile = "3.0"
+
 [build-dependencies]
 # For potential custom proto compilation if needed
 tonic-build = "0.12"
+
+[[bench]]
+name = "build_bench"
+harness = false

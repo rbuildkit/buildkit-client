@@ -2,9 +2,6 @@
 
 pub mod filesync;
 pub mod auth;
-pub mod server;
-pub mod attachable;
-pub mod simple;
 pub mod grpc_tunnel;
 
 use anyhow::{Context, Result};
@@ -20,9 +17,6 @@ use grpc_tunnel::GrpcTunnel;
 
 pub use filesync::FileSyncServer;
 pub use auth::{AuthServer, RegistryAuthConfig};
-pub use server::SessionServer;
-pub use attachable::SessionAttachable;
-pub use simple::SimpleSession;
 
 /// Session manager for BuildKit
 pub struct Session {

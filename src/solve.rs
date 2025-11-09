@@ -128,16 +128,31 @@ impl BuildKitClient {
             export_attrs.insert("name".to_string(), config.tags.join(","));
             export_attrs.insert("push".to_string(), "true".to_string());
 
-            // Add registry authentication if provided
-            if let Some(auth) = &config.registry_auth {
-                export_attrs.insert(
-                    "registry.insecure".to_string(),
-                    if auth.host.starts_with("localhost") {
-                        "true".to_string()
+            // Check if registry needs insecure flag based on tag or registry_auth
+            let registry_host = if let Some(auth) = &config.registry_auth {
+                Some(auth.host.as_str())
+            } else {
+                // Extract registry host from the first tag (format: host/image:tag or image:tag)
+                config.tags.first().and_then(|tag| {
+                    let parts: Vec<&str> = tag.split('/').collect();
+                    if parts.len() > 1 && (parts[0].contains(':') || parts[0].contains('.') || parts[0] == "localhost") {
+                        Some(parts[0])
                     } else {
-                        "false".to_string()
-                    },
-                );
+                        None
+                    }
+                })
+            };
+
+            // Determine if registry is insecure (HTTP instead of HTTPS)
+            if let Some(host) = registry_host {
+                let is_insecure = host.starts_with("localhost")
+                    || host.starts_with("127.0.0.1")
+                    || host.starts_with("registry:") // Docker Compose service name
+                    || (!host.contains('.') && !host.starts_with("docker.io")); // Simple heuristic for local names
+
+                if is_insecure {
+                    export_attrs.insert("registry.insecure".to_string(), "true".to_string());
+                }
             }
 
             exports.push(Exporter {
@@ -174,6 +189,12 @@ impl BuildKitClient {
                 }
             })
             .collect();
+
+        // Debug: Log exporter configuration
+        tracing::debug!("Configured {} exporters", exports.len());
+        for (i, exporter) in exports.iter().enumerate() {
+            tracing::debug!("Exporter {}: type={}, attrs={:?}", i, exporter.r#type, exporter.attrs);
+        }
 
         // Create solve request with session
         let request = SolveRequest {
@@ -269,6 +290,11 @@ impl BuildKitClient {
                 ..
             } => {
                 let mut url = repo_url.clone();
+
+                // Ensure URL ends with .git for Git protocol
+                if !url.ends_with(".git") {
+                    url.push_str(".git");
+                }
 
                 // Add authentication token if provided
                 if let Some(token) = token {

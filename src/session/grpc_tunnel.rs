@@ -80,6 +80,20 @@ impl GrpcTunnel {
         let method = req.uri().path().to_string();
         tracing::info!("Received gRPC call: {}", method);
 
+        // Debug: print all request headers
+        eprintln!("\n=== Request Headers for {} ===", method);
+        for (name, value) in req.headers() {
+            if let Ok(v) = value.to_str() {
+                eprintln!("  {}: {}", name, v);
+            }
+        }
+
+        // Extract dir-name header before consuming req
+        let dir_name = req.headers()
+            .get("dir-name")
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
         let body = req.into_body();
 
         // Dispatch to appropriate service
@@ -92,7 +106,7 @@ impl GrpcTunnel {
             }
             "/moby.filesync.v1.FileSync/DiffCopy" => {
                 // DiffCopy is a bidirectional streaming RPC - pass the stream
-                self.handle_file_sync_diff_copy_stream(body, respond).await
+                self.handle_file_sync_diff_copy_stream(body, respond, dir_name).await
             }
             "/moby.filesync.v1.Auth/GetTokenAuthority" => {
                 // Token-based auth not supported - return error to make BuildKit fall back
@@ -204,11 +218,17 @@ impl GrpcTunnel {
         &self,
         mut request_stream: h2::RecvStream,
         mut respond: SendResponse<Bytes>,
+        dir_name: Option<String>,
     ) -> Result<()> {
         use crate::proto::fsutil::types::{Packet, packet::PacketType};
         use prost::Message as ProstMessage;
 
-        tracing::info!("handle_file_sync_diff_copy_stream called");
+        use std::sync::atomic::{AtomicU32, Ordering};
+        static CALL_COUNTER: AtomicU32 = AtomicU32::new(0);
+        let call_id = CALL_COUNTER.fetch_add(1, Ordering::SeqCst);
+
+        tracing::info!("handle_file_sync_diff_copy_stream called (call #{}, dir_name: {:?})", call_id, dir_name);
+        eprintln!("\n========== DiffCopy Call #{} (dir_name: {:?}) ==========", call_id, dir_name);
 
         let file_sync = match &self.file_sync {
             Some(fs) => fs,
@@ -218,7 +238,7 @@ impl GrpcTunnel {
             }
         };
 
-        tracing::info!("FileSync.DiffCopy streaming started");
+        tracing::info!("FileSync.DiffCopy streaming started (call #{})", call_id);
 
         // Build response headers
         let response = Response::builder()
@@ -234,47 +254,39 @@ impl GrpcTunnel {
 
         // Get the root path from FileSyncServer
         let root_path = file_sync.get_root_path();
-        tracing::info!("Starting to send directory STAT packets from: {}", root_path.display());
+        tracing::info!("Starting to send STAT packets from: {} (call #{})", root_path.display(), call_id);
+        eprintln!("Root path: {}, is_dir: {}", root_path.display(), root_path.is_dir());
 
-        // First, collect all entries recursively
-        let mut entries = Vec::new();
-        if let Err(e) = Self::collect_entries_recursive(root_path.clone(), String::new(), &mut entries).await {
-            tracing::error!("Error collecting entries: {}", e);
-            let trailers = Response::builder()
-                .header("grpc-status", "2")
-                .header("grpc-message", e.to_string())
-                .body(())
-                .unwrap();
-            let _ = send_stream.send_trailers(trailers.headers().clone());
-            return Err(e);
-        }
-
-        // Debug: log entries before sorting
-        eprintln!("DEBUG: Collected {} entries before sorting", entries.len());
-        for (path, _, _) in &entries {
-            eprintln!("DEBUG: Entry: {}", path);
-        }
-
-        // Sort all entries by their relative path (fsutil requires lexicographic order)
-        entries.sort_by(|a, b| a.0.cmp(&b.0));
-
-        // Debug: log entries after sorting
-        eprintln!("DEBUG: Entries after sorting:");
-        for (path, _, _) in &entries {
-            eprintln!("DEBUG: Sorted: {}", path);
-        }
-
-        // Send STAT packets in sorted order and build file map
+        // Determine what to send based on dir_name header
+        // BuildKit sends "dockerfile" when it only wants the Dockerfile file
+        // Otherwise it wants the entire context
         use std::collections::HashMap;
         let mut file_map = HashMap::new();
-        for (id_counter, (rel_path, entry_path, metadata)) in entries.into_iter().enumerate() {
-            let entry_id = id_counter as u32;
+        let mut id_counter = 0u32;
 
+        let send_only_dockerfile = dir_name.as_deref() == Some("dockerfile");
+
+        if send_only_dockerfile {
+            // BuildKit only wants the Dockerfile - send just that file
+            eprintln!("BuildKit requested 'dockerfile' - sending only Dockerfile");
             use crate::proto::fsutil::types::{Packet, packet::PacketType, Stat};
 
-            // Create stat packet
+            let dockerfile_path = root_path.join("Dockerfile");
+            if !dockerfile_path.exists() {
+                tracing::error!("Dockerfile not found at {}", dockerfile_path.display());
+                let trailers = Response::builder()
+                    .header("grpc-status", "2")
+                    .header("grpc-message", "Dockerfile not found")
+                    .body(())
+                    .unwrap();
+                let _ = send_stream.send_trailers(trailers.headers().clone());
+                return Err(Error::PathNotFound(dockerfile_path.clone()));
+            }
+
+            let metadata = tokio::fs::metadata(&dockerfile_path).await?;
+
             let mut stat = Stat {
-                path: rel_path.clone(),
+                path: "Dockerfile".to_string(),
                 mode: 0,
                 uid: 0,
                 gid: 0,
@@ -294,25 +306,34 @@ impl GrpcTunnel {
 
             #[cfg(not(unix))]
             {
-                stat.mode = if metadata.is_dir() {
-                    0o040755  // S_IFDIR | 0o755
-                } else {
-                    0o100644  // S_IFREG | 0o644
-                };
+                stat.mode = 0o100644;  // S_IFREG | 0o644
             }
 
             let mode = stat.mode;
             let stat_packet = Packet {
                 r#type: PacketType::PacketStat as i32,
                 stat: Some(stat),
-                id: entry_id,
+                id: 0,
                 data: vec![],
             };
 
-            // Send stat packet
-            tracing::info!("Sending STAT packet for: {} (id: {}, mode: 0o{:o})", rel_path, entry_id, mode);
-            if let Err(e) = Self::send_grpc_packet(&mut send_stream, &stat_packet).await {
-                tracing::error!("Error sending STAT packet: {}", e);
+            eprintln!("DFS: Sending STAT #0: Dockerfile (FILE, mode: 0o{:o})", mode);
+            Self::send_grpc_packet(&mut send_stream, &stat_packet).await?;
+
+            // Store in file map
+            file_map.insert(0, dockerfile_path);
+        } else {
+            // BuildKit wants the full context - send entire tree using depth-first traversal
+            // fsutil requires files in depth-first order with entries sorted alphabetically within each directory
+            eprintln!("BuildKit requested context - sending directory tree");
+            if let Err(e) = Self::send_stat_packets_dfs(
+                root_path.clone(),
+                String::new(),
+                &mut send_stream,
+                &mut file_map,
+                &mut id_counter,
+            ).await {
+                tracing::error!("Error sending STAT packets: {}", e);
                 let trailers = Response::builder()
                     .header("grpc-status", "2")
                     .header("grpc-message", e.to_string())
@@ -320,11 +341,6 @@ impl GrpcTunnel {
                     .unwrap();
                 let _ = send_stream.send_trailers(trailers.headers().clone());
                 return Err(e);
-            }
-
-            // Store file path in map for later data requests (only for files)
-            if metadata.is_file() {
-                file_map.insert(entry_id, entry_path);
             }
         }
 
@@ -449,6 +465,110 @@ impl GrpcTunnel {
             .map_err(|e| Error::Http2Stream { source: e })?;
 
         Ok(())
+    }
+
+    /// Send STAT packets using depth-first traversal
+    /// This is the correct way to send files to BuildKit's fsutil validator
+    /// which requires files in depth-first order with entries sorted alphabetically within each directory
+    fn send_stat_packets_dfs<'a>(
+        path: std::path::PathBuf,
+        prefix: String,
+        stream: &'a mut h2::SendStream<Bytes>,
+        file_map: &'a mut std::collections::HashMap<u32, std::path::PathBuf>,
+        id_counter: &'a mut u32,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send + 'a>> {
+        Box::pin(async move {
+            use crate::proto::fsutil::types::{Packet, packet::PacketType, Stat};
+
+            tracing::debug!("send_stat_packets_dfs: {} (prefix: {})", path.display(), prefix);
+
+            // Read all entries in this directory
+            let mut entries = Vec::new();
+            let mut dir_entries = tokio::fs::read_dir(&path).await?;
+
+            while let Some(entry) = dir_entries.next_entry().await? {
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy().to_string();
+                let entry_path = entry.path();
+                let metadata = entry.metadata().await?;
+
+                entries.push((name, entry_path, metadata));
+            }
+
+            // Sort entries alphabetically by name (fsutil requirement)
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+
+            // Process entries in sorted order (depth-first)
+            for (name, entry_path, metadata) in entries {
+                let rel_path = if prefix.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", prefix, name)
+                };
+
+                let entry_id = *id_counter;
+                *id_counter += 1;
+
+                // Create and send STAT packet for this entry
+                let mut stat = Stat {
+                    path: rel_path.clone(),
+                    mode: 0,
+                    uid: 0,
+                    gid: 0,
+                    // For directories, size must be 0 (fsutil protocol requirement)
+                    size: if metadata.is_dir() { 0 } else { metadata.len() as i64 },
+                    mod_time: 0,
+                    linkname: String::new(),
+                    devmajor: 0,
+                    devminor: 0,
+                    xattrs: std::collections::HashMap::new(),
+                };
+
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    stat.mode = metadata.permissions().mode();
+                }
+
+                #[cfg(not(unix))]
+                {
+                    stat.mode = if metadata.is_dir() {
+                        0o040755  // S_IFDIR | 0o755
+                    } else {
+                        0o100644  // S_IFREG | 0o644
+                    };
+                }
+
+                let mode = stat.mode;
+                let size = stat.size;
+                let path_sent = stat.path.clone();
+                let stat_packet = Packet {
+                    r#type: PacketType::PacketStat as i32,
+                    stat: Some(stat),
+                    id: entry_id,
+                    data: vec![],
+                };
+
+                tracing::info!("Sending STAT packet for: {} (id: {}, mode: 0o{:o})", path_sent, entry_id, mode);
+                eprintln!("DFS: Sending STAT #{}: {} ({}, mode: 0o{:o} / 0x{:x}, size: {}, is_dir: {})",
+                         entry_id, path_sent,
+                         if metadata.is_dir() { "DIR" } else { "FILE" },
+                         mode, mode, size, (mode & 0o040000) != 0);
+                Self::send_grpc_packet(stream, &stat_packet).await?;
+
+                // Store file path in map for later data requests (only for files)
+                if metadata.is_file() {
+                    file_map.insert(entry_id, entry_path.clone());
+                }
+
+                // Recursively process directories
+                if metadata.is_dir() {
+                    Self::send_stat_packets_dfs(entry_path, rel_path, stream, file_map, id_counter).await?;
+                }
+            }
+
+            Ok(())
+        })
     }
 
     /// Recursively collect all entries (files and directories) from a path
